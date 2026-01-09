@@ -1,0 +1,18 @@
+Metric,Value
+Total Episodes,100.0
+Success Episodes,100.0
+Perfect Episodes,7.0
+Failure Episodes,0.0
+Mean Reward,410.1808172370568
+Std Reward,154.2174357927402
+Best Reward,817.975384007482
+Worst Reward,206.25421830715038
+Median Reward,393.7808568420717
+Mean Asteroids Destroyed,8.5
+Total Asteroids Destroyed,850.0
+Mean Episode Length,170.86
+Total Shots Fired,6529.0
+Total Shots Hit,850.0
+Overall Hit Rate (%),13.018839025884516
+Mean Hit Rate (%),13.493636589285481
+Std Hit Rate (%),6.947935312005687

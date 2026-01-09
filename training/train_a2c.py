@@ -9,13 +9,21 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from environment.orbital_defender_env import OrbitalDefenderEnv
 from agents.a2c_agent import A2CAgent
+from evaluation.quick_evaluate import quick_evaluate
 
 def train_a2c(
     episodes=1000,
     max_steps=300,
     save_freq=100,
     save_dir='models',
-    device='cpu'
+    device='cpu',
+    resume_from=None,
+    lr=0.0003,
+    gamma=0.99,
+    value_coef=0.5,
+    entropy_coef=0.02,
+    eval_freq=200,
+    eval_episodes=20
 ):
     """Train A2C agent on OrbitalDefenderEnv"""
     
@@ -24,16 +32,33 @@ def train_a2c(
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
     
-    # Create agent with improved hyperparameters
+    # Create agent with hyperparameters
     agent = A2CAgent(
         state_dim=state_dim,
         action_dim=action_dim,
-        lr=0.0003,
-        gamma=0.99,
-        value_coef=0.5,
-        entropy_coef=0.02,
+        lr=lr,
+        gamma=gamma,
+        value_coef=value_coef,
+        entropy_coef=entropy_coef,
         device=device
     )
+    
+    # Resume from checkpoint if provided
+    start_episode = 0
+    best_performance = None  # Track best performance for saving best model
+    if resume_from and os.path.exists(resume_from):
+        print(f"🔄 Resuming training from checkpoint: {resume_from}")
+        agent.load(resume_from)
+        # Try to extract episode number from filename
+        try:
+            # Extract episode number from filename like "a2c_model_episode_1000.pth"
+            filename = os.path.basename(resume_from)
+            if 'episode_' in filename:
+                episode_str = filename.split('episode_')[1].split('.')[0]
+                start_episode = int(episode_str)
+                print(f"   Starting from episode {start_episode + 1}")
+        except:
+            print("   Could not determine episode number, starting from 0")
     
     # Create save directory
     os.makedirs(save_dir, exist_ok=True)
@@ -46,9 +71,13 @@ def train_a2c(
     episode_value_losses = []
     episode_entropies = []
     
-    print("Starting A2C training...")
+    if start_episode > 0:
+        print(f"📊 Continuing training from episode {start_episode + 1} to {start_episode + episodes}")
+    else:
+        print("🚀 Starting A2C training...")
     print(f"State dimension: {state_dim}, Action dimension: {action_dim}")
     print(f"Device: {device}")
+    print(f"Hyperparameters: lr={lr}, gamma={gamma}, value_coef={value_coef}, entropy_coef={entropy_coef}")
     print("-" * 50)
     
     for episode in range(episodes):
@@ -95,22 +124,59 @@ def train_a2c(
             episode_entropies.append(0)
         
         # Print progress
+        current_episode_num = start_episode + episode + 1
+        total_episodes = start_episode + episodes
         if (episode + 1) % 10 == 0:
             avg_reward = np.mean(episode_rewards[-10:])
             avg_length = np.mean(episode_lengths[-10:])
             avg_loss = np.mean(episode_losses[-10:]) if episode_losses[-10:] else 0
             avg_entropy = np.mean(episode_entropies[-10:]) if episode_entropies[-10:] else 0
-            print(f"Episode {episode + 1}/{episodes} | "
+            print(f"Episode {current_episode_num}/{total_episodes} | "
                   f"Avg Reward: {avg_reward:.2f} | "
                   f"Avg Length: {avg_length:.1f} | "
                   f"Avg Loss: {avg_loss:.4f} | "
                   f"Avg Entropy: {avg_entropy:.4f}")
         
+        # Evaluate agent periodically
+        if eval_freq > 0 and current_episode_num % eval_freq == 0:
+            print(f"\n[Evaluation at Episode {current_episode_num}]")
+            eval_results = quick_evaluate(agent, num_episodes=eval_episodes, max_steps=max_steps, device=device)
+            
+            print(f"  Avg Reward: {eval_results['avg_reward']:.2f} ± {eval_results['std_reward']:.2f}")
+            print(f"  Destruction Rate: {eval_results['destruction_rate']:.1f}%")
+            print(f"  Success Rate: {eval_results['success_rate']:.1f}%")
+            print(f"  Impact Rate: {eval_results['impact_rate']:.1f}%")
+            
+            # Check if this is the best model so far
+            # Use a combination of metrics to determine best model
+            # Priority: success_rate > destruction_rate > avg_reward
+            is_best = False
+            if best_performance is None:
+                is_best = True
+            else:
+                # Compare: higher success rate is better, then destruction rate, then reward
+                if eval_results['success_rate'] > best_performance['success_rate']:
+                    is_best = True
+                elif (eval_results['success_rate'] == best_performance['success_rate'] and
+                      eval_results['destruction_rate'] > best_performance['destruction_rate']):
+                    is_best = True
+                elif (eval_results['success_rate'] == best_performance['success_rate'] and
+                      eval_results['destruction_rate'] == best_performance['destruction_rate'] and
+                      eval_results['avg_reward'] > best_performance['avg_reward']):
+                    is_best = True
+            
+            if is_best:
+                best_performance = eval_results.copy()
+                best_model_path = os.path.join(save_dir, 'a2c_model_best.pth')
+                agent.save(best_model_path)
+                print(f"  [NEW BEST MODEL] Saved to {best_model_path}")
+            print()
+        
         # Save model
-        if (episode + 1) % save_freq == 0:
-            model_path = os.path.join(save_dir, f'a2c_model_episode_{episode + 1}.pth')
+        if current_episode_num % save_freq == 0:
+            model_path = os.path.join(save_dir, f'a2c_model_episode_{current_episode_num}.pth')
             agent.save(model_path)
-            print(f"Model saved to {model_path}")
+            print(f"💾 Model saved to {model_path}")
     
     # Save final model
     final_model_path = os.path.join(save_dir, 'a2c_model_final.pth')
@@ -238,6 +304,22 @@ if __name__ == "__main__":
     default_device = 'cuda' if torch.cuda.is_available() else 'cpu'
     parser.add_argument('--device', type=str, default=default_device, 
                        help=f'Device to use (cpu/cuda). Default: {default_device}')
+    parser.add_argument('--resume-from', type=str, default=None,
+                       help='Resume training from a checkpoint file (e.g., models/a2c_model_episode_1000.pth)')
+    
+    # Hyperparameters
+    parser.add_argument('--lr', type=float, default=0.0003,
+                       help='Learning rate (default: 0.0003)')
+    parser.add_argument('--gamma', type=float, default=0.99,
+                       help='Discount factor (default: 0.99)')
+    parser.add_argument('--value-coef', type=float, default=0.5,
+                       help='Value loss coefficient (default: 0.5)')
+    parser.add_argument('--entropy-coef', type=float, default=0.02,
+                       help='Entropy bonus coefficient (default: 0.02)')
+    parser.add_argument('--eval-freq', type=int, default=200,
+                       help='Evaluation frequency in episodes (default: 200, set to 0 to disable)')
+    parser.add_argument('--eval-episodes', type=int, default=20,
+                       help='Number of episodes for evaluation (default: 20)')
     
     args = parser.parse_args()
     
@@ -255,6 +337,13 @@ if __name__ == "__main__":
         max_steps=args.max_steps,
         save_freq=args.save_freq,
         save_dir=args.save_dir,
-        device=args.device
+        device=args.device,
+        resume_from=args.resume_from,
+        lr=args.lr,
+        gamma=args.gamma,
+        value_coef=args.value_coef,
+        entropy_coef=args.entropy_coef,
+        eval_freq=args.eval_freq,
+        eval_episodes=args.eval_episodes
     )
 
