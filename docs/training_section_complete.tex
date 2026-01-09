@@ -1,0 +1,289 @@
+\label{sec:training}
+\usetikzlibrary{positioning}
+
+\subsection{Training Pipelines}
+
+\subsubsection{A2C Training Process}
+
+\begin{enumerate}
+    \item \textbf{Initialization:}
+    \begin{itemize}
+        \item Create environment and agent
+        \item Initialize Actor-Critic network with random weights
+        \item Set hyperparameters (learning rate, discount factor, value/entropy coefficients)
+        \item Optionally resume from checkpoint
+    \end{itemize}
+    \item \textbf{Episode Loop:}
+    \begin{enumerate}
+        \item Reset environment and agent episode buffer
+        \item Collect trajectory:
+        \begin{itemize}
+            \item Select action using current policy (with exploration)
+            \item Execute action in environment
+            \item Store state, action, log probability, value estimate, reward, done flag
+        \end{itemize}
+        \item Train on collected episode:
+        \begin{itemize}
+            \item Compute discounted returns (TD($\lambda$) or Monte Carlo)
+            \item Compute advantages (returns - value estimates)
+            \item Normalize advantages for stability
+            \item Update policy network (policy gradient with entropy bonus)
+            \item Update value network (value function regression)
+        \end{itemize}
+        \item Log metrics (reward, length, loss, entropy)
+        \item \textbf{Periodic Evaluation} (every N episodes, default 200):
+        \begin{itemize}
+            \item Run evaluation episodes without exploration
+            \item Compute metrics: average reward, destruction rate, success rate, impact rate
+            \item Track best performing model
+            \item Save best model if performance improved
+        \end{itemize}
+    \end{enumerate}
+    \item \textbf{Checkpointing:}
+    \begin{itemize}
+        \item Save model every N episodes (configurable)
+        \item Save best model when evaluation improves
+        \item Save final model at end of training
+        \item Generate training curves (rewards, losses, entropy, hit rates)
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{DQN Training Process}
+
+\begin{enumerate}
+    \item \textbf{Initialization:}
+    \begin{itemize}
+        \item Create environment and agent
+        \item Initialize Q-network and target network (identical weights)
+        \item Initialize replay buffer (experience replay)
+        \item Set $\epsilon$-greedy exploration schedule
+    \end{itemize}
+    \item \textbf{Episode Loop:}
+    \begin{enumerate}
+        \item Reset environment
+        \item Step loop:
+        \begin{itemize}
+            \item Select action using $\epsilon$-greedy policy
+            \item Execute action in environment
+            \item Store experience tuple $(s, a, r, s', done)$ in replay buffer
+            \item Sample random batch from replay buffer (if buffer sufficient)
+            \item Compute Q-learning targets
+            \item Update Q-network using TD error
+            \item Update target network periodically (soft or hard update)
+        \end{itemize}
+        \item Decay $\epsilon$ (exploration rate)
+        \item Log metrics
+        \item \textbf{Periodic Evaluation} (every N episodes, default 200):
+        \begin{itemize}
+            \item Run evaluation episodes with $\epsilon = 0$ (no exploration)
+            \item Compute performance metrics
+            \item Track and save best model
+        \end{itemize}
+    \end{enumerate}
+    \item \textbf{Evaluation:}
+    \begin{itemize}
+        \item Periodic evaluation episodes (no exploration)
+        \item Track best model based on success rate, destruction rate, and average reward
+        \item Save best model checkpoint
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Training Script Configurations}
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{|l|p{7cm}|}
+\hline
+\textbf{A2C Script Arguments} &
+\begin{verbatim}
+python training/train_a2c.py \
+    --episodes 1000 \
+    --max-steps 300 \
+    --save-freq 100 \
+    --save-dir models \
+    --device cpu \
+    --resume-from models/a2c_model_episode_1000.pth \
+    --lr 0.0003 \
+    --gamma 0.99 \
+    --value-coef 0.5 \
+    --entropy-coef 0.02 \
+    --eval-freq 200 \
+    --eval-episodes 20
+\end{verbatim} \\
+\hline
+\textbf{Key Features} &
+\begin{itemize}[leftmargin=*,nosep]
+    \item Resume training from checkpoint
+    \item Configurable hyperparameters (learning rate, discount, coefficients)
+    \item Automatic device detection (CPU/GPU)
+    \item Periodic evaluation with best model tracking
+    \item Comprehensive logging and metrics
+    \item Training curves generation
+\end{itemize} \\
+\hline
+\textbf{DQN Script Arguments} &
+\begin{verbatim}
+python training/train_dqn.py \
+    --episodes 3000 \
+    --max-steps 300 \
+    --target-update-freq 5 \
+    --save-freq 100 \
+    --eval-freq 200 \
+    --eval-episodes 20 \
+    --save-dir models \
+    --device cpu \
+    --resume-from models/dqn_model_episode_1000.pth
+\end{verbatim} \\
+\hline
+\textbf{Key Features} &
+\begin{itemize}[leftmargin=*,nosep]
+    \item Periodic evaluation without exploration ($\epsilon = 0$)
+    \item Best model tracking and automatic saving
+    \item Experience replay with configurable buffer size
+    \item Target network updates (hard or soft)
+    \item Checkpointing and resume capability
+    \item Comprehensive metrics tracking
+\end{itemize} \\
+\hline
+\end{tabular}
+\caption{Training script configurations and features for A2C and DQN agents.}
+\end{table}
+
+\subsection{Training Metrics}
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{|l|l|l|l|}
+\hline
+\textbf{Metric} & \textbf{Per Episode} & \textbf{Aggregated} & \textbf{Evaluation} \\
+\hline
+Episode reward & \checkmark & Average over last N episodes & \checkmark \\
+Episode length & \checkmark & Smoothed curve & \checkmark \\
+Asteroids destroyed & \checkmark & Best episode performance & \checkmark \\
+Training loss & \checkmark (policy/value/total) & - & - \\
+Policy entropy (A2C) & \checkmark & - & - \\
+Epsilon value (DQN) & \checkmark & - & - \\
+Success rate & - & Positive reward rate & \checkmark \\
+Destruction rate & - & - & \checkmark \\
+Impact rate & - & - & \checkmark \\
+Hit rate & \checkmark & - & \checkmark \\
+Best model score & - & - & \checkmark \\
+\hline
+\end{tabular}
+\caption{Metrics tracked during training and evaluation of A2C and DQN agents.}
+\end{table}
+
+\subsection{Evaluation During Training}
+
+Both A2C and DQN training scripts include periodic evaluation to monitor agent performance:
+
+\begin{itemize}
+    \item \textbf{Frequency:} Configurable (default: every 200 episodes)
+    \item \textbf{Episodes:} Configurable number of evaluation episodes (default: 20)
+    \item \textbf{Exploration:} Disabled during evaluation (deterministic policy)
+    \item \textbf{Metrics Computed:}
+    \begin{itemize}
+        \item Average reward and standard deviation
+        \item Destruction rate: percentage of asteroids destroyed
+        \item Success rate: percentage of episodes with positive reward
+        \item Impact rate: percentage of episodes ending with planet impact
+        \item Hit rate: percentage of shots that hit asteroids
+    \end{itemize}
+    \item \textbf{Best Model Tracking:} Automatically saves best model based on:
+    \begin{enumerate}
+        \item Success rate (primary criterion)
+        \item Destruction rate (secondary criterion)
+        \item Average reward (tertiary criterion)
+    \end{enumerate}
+\end{itemize}
+
+\subsection{Flowchart Representation}
+
+\begin{center}
+\begin{tikzpicture}[node distance=1.2cm, auto, scale=0.9, transform shape]
+
+    % Top row: Reset Environment and Select Action
+    \node (reset) [rectangle, draw, rounded corners, fill=green!20, text width=2.5cm, align=center] 
+        {Reset Environment};
+    \node (action) [rectangle, draw, rounded corners, fill=yellow!20, text width=2.5cm, align=center, right=of reset, xshift=1cm] 
+        {Select Action};
+    \node (step) [rectangle, draw, rounded corners, fill=orange!20, text width=2.5cm, align=center, right=of action, xshift=1cm] 
+        {Execute \& Store};
+    
+    % Decision and training nodes - vertical layout below
+    \node (done) [diamond, draw, fill=cyan!20, text width=2cm, align=center, below=of step, aspect=2, yshift=0.3cm] 
+        {Done?};
+    \node (train) [rectangle, draw, rounded corners, fill=pink!20, text width=2.5cm, align=center, below=of done, yshift=-0.4cm] 
+        {Train Network};
+    \node (eval) [diamond, draw, fill=cyan!20, text width=2cm, align=center, below=of train, aspect=2] 
+        {Eval?};
+    \node (checkpoint) [diamond, draw, fill=cyan!20, text width=2cm, align=center, below=of eval, aspect=2] 
+        {Save?};
+    \node (save_text) [below=of checkpoint, yshift=-0.3cm] {Save};
+
+    % Helper coordinates for routing (positioned away from diamonds)
+    \node (loop_top) [coordinate, above=of action, yshift=0.5cm] {};
+    \node (loop_left) [coordinate, left=of done, xshift=-2.5cm] {};
+    \node (eval_no_left) [coordinate, left=of eval, xshift=-2cm] {};
+    \node (checkpoint_no_left) [coordinate, left=of checkpoint, xshift=-2cm] {};
+    \node (save_route) [coordinate, below=of checkpoint, yshift=-1cm] {};
+
+    % Entry arrow from top to Select Action
+    \draw[->] (loop_top) -- (action.north);
+    
+    % Reset Environment -> Select Action
+    \draw[->] (reset.east) -- (action.west);
+    
+    % Main flow: Action -> Execute
+    \draw[->] (action.east) -- (step.west);
+    
+    % Execute -> Done decision
+    \draw[->] (step.south) -- (done.north);
+    
+    % Done? decision paths - No loops back to Select Action
+    \draw[->] (done.west) -- node[above] {No} (loop_left) |- (loop_top) -| (action.north);
+    % Done? Yes -> Train Network
+    \draw[->] (done.south) -- node[right] {Yes} (train.north);
+    
+    % Train Network -> Eval?
+    \draw[->] (train.south) -- (eval.north);
+    
+    % Eval? decision paths - No loops back to Train Network
+    \draw[->] (eval.west) -- node[above] {No} (eval_no_left) |- (train.west);
+    % Eval? Yes -> Save?
+    \draw[->] (eval.south) -- node[right] {Yes} (checkpoint.north);
+    
+    % Save? decision paths - No loops back to Eval?
+    \draw[->] (checkpoint.west) -- node[above] {No} (checkpoint_no_left) |- (eval.west);
+    % Save? Yes -> Save text
+    \draw[->] (checkpoint.south) -- node[right] {Yes} (save_text.north);
+    % Save -> Reset Environment (loop back to start)
+    \draw[->] (save_text.south) |- (reset.west);
+
+\end{tikzpicture}
+\end{center}
+
+\subsection{Training Hyperparameters}
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{|l|c|c|c|}
+\hline
+\textbf{Hyperparameter} & \textbf{A2C Default} & \textbf{DQN Default} & \textbf{Description} \\
+\hline
+Learning rate & 0.0003 & 0.001 & Network update step size \\
+Discount factor ($\gamma$) & 0.99 & 0.99 & Future reward importance \\
+Value coefficient & 0.5 & - & Value loss weight (A2C) \\
+Entropy coefficient & 0.02 & - & Exploration bonus (A2C) \\
+$\epsilon$-start & - & 1.0 & Initial exploration (DQN) \\
+$\epsilon$-end & - & 0.01 & Final exploration (DQN) \\
+$\epsilon$-decay & - & 0.995 & Exploration decay (DQN) \\
+Replay buffer size & - & 10000 & Experience storage (DQN) \\
+Batch size & - & 64 & Training batch (DQN) \\
+Target update freq & - & 5 & Target network sync (DQN) \\
+\hline
+\end{tabular}
+\caption{Default hyperparameters for A2C and DQN training.}
+\end{table}
+

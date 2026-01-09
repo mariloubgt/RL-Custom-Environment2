@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 # for deployment
+=======
+
+>>>>>>> ccc959cf9f2c7962501af766d48f079158c9d504
 """
 Orbital Defender Visualization Application
 
@@ -105,6 +109,9 @@ def visualize_agent(
     print(f"\n🚀 Starting visualization...")
     print(f"   Press ESC or close window to exit")
     print(f"   Press F3 to toggle FPS display")
+    print(f"   Press F4 to toggle radar")
+    print(f"   Press F5 to toggle distance rings")
+    print(f"   Press F6 to toggle targeting line")
     print(f"   Running {episodes} episodes\n")
     print("=" * 60)
     
@@ -112,6 +119,8 @@ def visualize_agent(
     total_episodes = 0
     total_rewards = []
     total_asteroids_destroyed = 0
+    total_shots_fired = 0
+    total_shots_hit = 0
     episode_times = []
     
     running = True
@@ -123,6 +132,8 @@ def visualize_agent(
             episode_reward = 0
             episode_steps = 0
             asteroids_destroyed_this_episode = 0
+            shots_fired_this_episode = 0
+            shots_hit_this_episode = 0
             initial_asteroid_count = len(env.asteroids)
             episode_start_time = time.time()
             
@@ -144,16 +155,24 @@ def visualize_agent(
                 episode_reward += reward
                 episode_steps += 1
                 
-                # Check if asteroid was destroyed
-                if action == 2 and reward > 5:  # Fire action with positive reward
-                    asteroids_destroyed_this_episode += 1
-                    total_asteroids_destroyed += 1
-                    # Create explosion effect at asteroid position
-                    if env.asteroids:
-                        # Find the destroyed asteroid (closest one that was hit)
-                        closest = min(env.asteroids, key=lambda a: a["distance"])
-                        x, y = renderer.world_to_screen(closest["angle"], closest["distance"])
-                        renderer.create_explosion(x, y, color=(255, 100, 0), size='large')
+                # Track shots fired and hits
+                if action == 2:  # Fire action
+                    shots_fired_this_episode += 1
+                    total_shots_fired += 1
+                    if reward > 5:  # Hit (positive reward indicates hit)
+                        shots_hit_this_episode += 1
+                        total_shots_hit += 1
+                        asteroids_destroyed_this_episode += 1
+                        total_asteroids_destroyed += 1
+                        # Create explosion effect at asteroid position
+                        if env.asteroids:
+                            # Find the destroyed asteroid (closest one that was hit)
+                            closest = min(env.asteroids, key=lambda a: a["distance"])
+                            x, y = renderer.world_to_screen(closest["angle"], closest["distance"])
+                            renderer.create_explosion(x, y, color=(255, 100, 0), size='large')
+                
+                # Calculate hit rate for this episode
+                hit_rate_episode = (shots_hit_this_episode / shots_fired_this_episode * 100) if shots_fired_this_episode > 0 else 0.0
                 
                 # Render multiple frames per step for smooth animation
                 for _ in range(3):  # Render 3 frames per step for smoother animation
@@ -163,7 +182,11 @@ def visualize_agent(
                         'reward': reward,
                         'total_reward': episode_reward,
                         'asteroids_destroyed': asteroids_destroyed_this_episode,
-                        'agent_type': agent_name
+                        'agent_type': agent_name,
+                        'remaining_asteroids': len(env.asteroids),
+                        'shots_fired': shots_fired_this_episode,
+                        'shots_hit': shots_hit_this_episode,
+                        'hit_rate': hit_rate_episode
                     }
                     renderer.render(env, action=action, stats=stats)
                     time.sleep(0.05)  # Slow down animation - 50ms delay per frame
@@ -178,10 +201,12 @@ def visualize_agent(
                     episode_time = time.time() - episode_start_time
                     episode_times.append(episode_time)
                     
+                    hit_rate = (shots_hit_this_episode / shots_fired_this_episode * 100) if shots_fired_this_episode > 0 else 0.0
                     print(f"Episode {current_episode}/{episodes} | "
                           f"Steps: {episode_steps:3d} | "
                           f"Reward: {episode_reward:7.2f} | "
                           f"Destroyed: {asteroids_destroyed_this_episode}/{initial_asteroid_count} | "
+                          f"Shots: {shots_hit_this_episode}/{shots_fired_this_episode} ({hit_rate:.1f}%) | "
                           f"Time: {episode_time:.2f}s")
                     
                     # Wait a bit before next episode
@@ -196,6 +221,7 @@ def visualize_agent(
             avg_reward = np.mean(total_rewards)
             std_reward = np.std(total_rewards)
             avg_time = np.mean(episode_times)
+            overall_hit_rate = (total_shots_hit / total_shots_fired * 100) if total_shots_fired > 0 else 0.0
             print("\n" + "=" * 60)
             print("📊 VISUALIZATION SUMMARY")
             print("=" * 60)
@@ -204,6 +230,9 @@ def visualize_agent(
             print(f"Best Reward:             {max(total_rewards):.2f}")
             print(f"Worst Reward:            {min(total_rewards):.2f}")
             print(f"Total Asteroids Destroyed: {total_asteroids_destroyed}")
+            print(f"Total Shots Fired:       {total_shots_fired}")
+            print(f"Total Shots Hit:         {total_shots_hit}")
+            print(f"Overall Hit Rate:        {overall_hit_rate:.1f}%")
             print(f"Average Episode Time:    {avg_time:.2f}s")
             print(f"Total Time:              {sum(episode_times):.2f}s")
             print("=" * 60)
@@ -226,6 +255,9 @@ def visualize_human():
     print("  SPACE             - Fire")
     print("  ESC               - Exit")
     print("  F3                - Toggle FPS display")
+    print("  F4                - Toggle radar")
+    print("  F5                - Toggle distance rings")
+    print("  F6                - Toggle targeting line")
     print("=" * 60 + "\n")
     
     state, _ = env.reset()
@@ -273,13 +305,28 @@ def visualize_human():
                     print(f"Episode {episode_num} ended! "
                           f"Steps: {episode_steps}, "
                           f"Reward: {episode_reward:.2f}, "
-                          f"Asteroids Destroyed: {asteroids_destroyed}")
+                          f"Asteroids Destroyed: {asteroids_destroyed}, "
+                          f"Hit Rate: {hit_rate:.1f}%")
                     state, _ = env.reset()
                     episode_reward = 0
                     episode_steps = 0
                     asteroids_destroyed = 0
                     episode_num += 1
+                    visualize_human.shots_fired = 0
+                    visualize_human.shots_hit = 0
                     time.sleep(1.0)
+            
+            # Track shots for human mode
+            if not hasattr(visualize_human, 'shots_fired'):
+                visualize_human.shots_fired = 0
+                visualize_human.shots_hit = 0
+            
+            if action == 2:
+                visualize_human.shots_fired += 1
+                if reward > 5:
+                    visualize_human.shots_hit += 1
+            
+            hit_rate = (visualize_human.shots_hit / visualize_human.shots_fired * 100) if visualize_human.shots_fired > 0 else 0.0
             
             stats = {
                 'episode': episode_num,
@@ -287,7 +334,10 @@ def visualize_human():
                 'reward': 0,
                 'total_reward': episode_reward,
                 'asteroids_destroyed': asteroids_destroyed,
-                'agent_type': 'Human'
+                'agent_type': 'Human',
+                'shots_fired': visualize_human.shots_fired,
+                'shots_hit': visualize_human.shots_hit,
+                'hit_rate': hit_rate
             }
             renderer.render(env, action=action, stats=stats)
     

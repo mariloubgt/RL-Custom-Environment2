@@ -125,31 +125,36 @@ class A2CAgent:
         # Convert to tensors
         states = torch.FloatTensor(np.array(self.states)).to(self.device)
         actions = torch.LongTensor(self.actions).to(self.device)
-        log_probs = torch.stack(self.log_probs).to(self.device)
         values = torch.stack(self.values).squeeze().to(self.device)
-        entropies = torch.stack(self.entropies).to(self.device)
         
         # Compute returns
         returns = self.compute_returns()
         
-        # Compute advantages
-        advantages = returns - values
+        # Compute advantages using old values (for advantage estimation)
+        advantages = returns - values.detach()
         
         # Normalize advantages
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        if len(advantages) > 1:
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         
-        # Get current policy and values
-        _, current_values = self.network(states)
+        # Get current policy and values (recompute with updated network)
+        # Only call network once for efficiency
+        policy, current_values = self.network(states)
         current_values = current_values.squeeze()
         
-        # Policy loss (actor)
-        policy_loss = -(log_probs * advantages.detach()).mean()
+        # Recompute log_probs with current policy (correct A2C implementation)
+        dist = torch.distributions.Categorical(policy)
+        current_log_probs = dist.log_prob(actions)
+        current_entropies = dist.entropy()
+        
+        # Policy loss (actor) - use current policy log_probs
+        policy_loss = -(current_log_probs * advantages.detach()).mean()
         
         # Value loss (critic)
         value_loss = F.mse_loss(current_values, returns)
         
-        # Entropy bonus
-        entropy_loss = -entropies.mean()
+        # Entropy bonus (use current policy entropy)
+        entropy_loss = -current_entropies.mean()
         
         # Total loss
         total_loss = policy_loss + self.value_coef * value_loss + self.entropy_coef * entropy_loss
@@ -179,7 +184,15 @@ class A2CAgent:
     
     def load(self, filepath):
         """Load the agent"""
-        checkpoint = torch.load(filepath)
+        checkpoint = torch.load(filepath, map_location=self.device)
         self.network.load_state_dict(checkpoint['network'])
-        self.optimizer.load_state_dict(checkpoint['optimizer'])
+        
+        # Only load optimizer if it exists and matches current model dimensions
+        if 'optimizer' in checkpoint:
+            try:
+                self.optimizer.load_state_dict(checkpoint['optimizer'])
+            except (RuntimeError, KeyError):
+                # Optimizer state doesn't match (e.g., after model adaptation)
+                # This is OK - optimizer will be reinitialized
+                print("   ⚠️  Optimizer state not compatible, will be reinitialized")
 
