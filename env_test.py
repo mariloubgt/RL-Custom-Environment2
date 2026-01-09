@@ -1,4 +1,4 @@
-from environment.orbital_defender import OrbitalDefenderEnv
+from environment.orbital_defender_env import OrbitalDefenderEnv
 import numpy as np
 
 print("Testing Orbital Defender Environment...")

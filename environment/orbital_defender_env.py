@@ -21,6 +21,7 @@ class OrbitalDefenderEnv(gym.Env):
         self.planet_radius = 2.0
         self.max_asteroids = 5
         self.consecutive_hits = 0  # Track consecutive hits for bonus
+        self.curriculum_level = None  # For curriculum learning
         self.reset()
 
     def reset(self, seed=None, options=None):
@@ -31,9 +32,10 @@ class OrbitalDefenderEnv(gym.Env):
         self.consecutive_hits = 0  # Reset consecutive hits counter
         self.asteroids_destroyed_this_episode = 0  # Track total destroyed
 
-        # Create asteroids
+        # Create asteroids (support curriculum learning)
+        num_asteroids = self.curriculum_level if self.curriculum_level is not None else self.max_asteroids
         self.asteroids = []
-        for _ in range(self.max_asteroids):
+        for _ in range(num_asteroids):
             self.asteroids.append({
                 "angle": np.random.uniform(-math.pi, math.pi),
                 "distance": np.random.uniform(6.0, 10.0),
@@ -79,7 +81,7 @@ class OrbitalDefenderEnv(gym.Env):
         
         for a in self.asteroids:
             a["angle"] += a["angular_velocity"]
-            a["distance"] -= 0.03  # Slower movement (was 0.05) - gives agent more time
+            a["distance"] -= 0.015  # Even slower (was 0.02) - gives agent even more time to react
 
             # Track closest asteroid for reward shaping
             if a["distance"] < min_distance:
@@ -89,10 +91,16 @@ class OrbitalDefenderEnv(gym.Env):
             # Track dangerous asteroids (close to planet)
             if a["distance"] < 5.0:
                 dangerous_asteroids.append(a)
+            
+            # PROGRESSIVE DISTANCE PENALTY: Penalize asteroids getting too close (NEW)
+            # This teaches agent to destroy asteroids BEFORE they get dangerous
+            if a["distance"] < 3.0 and a["distance"] > self.planet_radius:
+                distance_penalty = -10.0 * (3.0 - a["distance"]) / 1.0  # Up to -10 penalty
+                reward += distance_penalty
 
             # Planet impact - CRITICAL FAILURE
             if a["distance"] <= self.planet_radius:
-                reward = -200.0  # Even stronger penalty (was -100)
+                reward = -500.0  # Much stronger penalty (was -200) - make it REALLY hurt
                 terminated = True
                 self.consecutive_hits = 0  # Reset streak on failure
                 return self._get_obs(), reward, terminated, False, {}
@@ -129,13 +137,30 @@ class OrbitalDefenderEnv(gym.Env):
         
         # 4. EFFICIENCY REWARD: Small reward for each step without planet impact
         if not terminated and len(self.asteroids) > 0:
-            reward += 0.2  # Increased from 0.1 - stronger signal for survival
+            reward += 0.5  # Increased from 0.2 - much stronger signal for survival
+            
+            # 4b. SAFETY REWARD: Strong reward for keeping asteroids at safe distance
+            if closest_asteroid:
+                safe_distance = closest_asteroid["distance"]
+                if safe_distance > 5.0:  # Safe zone
+                    safety_reward = 0.3 * (safe_distance - 5.0) / 3.0
+                    reward += safety_reward
+                elif safe_distance < 4.0:  # Danger zone - small penalty
+                    danger_penalty = -0.5 * (4.0 - safe_distance) / 2.0
+                    reward += danger_penalty
         
         # 5. PROGRESS REWARD: Reward for reducing asteroid count
+        initial_count = self.curriculum_level if self.curriculum_level is not None else self.max_asteroids
         remaining_asteroids = len(self.asteroids)
-        if remaining_asteroids < self.max_asteroids:
-            progress_reward = 0.2 * (self.max_asteroids - remaining_asteroids)
+        if remaining_asteroids < initial_count:
+            progress_reward = 1.0 * (initial_count - remaining_asteroids)  # Increased from 0.5
             reward += progress_reward
+            
+            # Progressive completion bonus: Extra reward for each asteroid destroyed
+            destroyed_count = initial_count - remaining_asteroids
+            # Stronger bonus for each asteroid destroyed (encourages completion)
+            completion_bonus = 5.0 * destroyed_count  # Increased from 2.0 - 5 points per asteroid
+            reward += completion_bonus
 
         # ========== FIRE ACTION WITH ENHANCED REWARDS ==========
         if action == 2:
@@ -145,7 +170,7 @@ class OrbitalDefenderEnv(gym.Env):
             for a in self.asteroids:
                 angle_diff = abs(self.turret_angle - a["angle"])
                 # Increased firing range and angle tolerance (more forgiving)
-                if angle_diff < 0.25 and a["distance"] < 8.0:  # Wider angle, longer range
+                if angle_diff < 0.35 and a["distance"] < 9.5:  # Even wider angle (0.3→0.35), longer range (9.0→9.5)
                     hit_asteroid = a
                     hit = True
                     break
@@ -155,8 +180,13 @@ class OrbitalDefenderEnv(gym.Env):
                 base_reward = 30.0
                 
                 # Distance bonus: More reward for hitting closer asteroids (urgency)
-                distance_factor = (8.0 - hit_asteroid["distance"]) / 6.0  # Adjusted for new range
-                distance_bonus = 20.0 * distance_factor  # Increased from 15.0 to 20.0
+                # BUT: Less reward for hitting VERY close asteroids (encourage early hits)
+                if hit_asteroid["distance"] > 6.0:  # Far asteroid - big bonus
+                    distance_factor = (9.0 - hit_asteroid["distance"]) / 3.0
+                    distance_bonus = 25.0 * distance_factor  # Big bonus for early hits
+                else:  # Close asteroid - smaller bonus (should have hit it earlier)
+                    distance_factor = (hit_asteroid["distance"] - 3.0) / 3.0
+                    distance_bonus = 10.0 * distance_factor  # Smaller bonus
                 
                 # Accuracy bonus: More reward for precise hits
                 angle_factor = 1.0 - (angle_diff / 0.25)  # Updated for new tolerance
@@ -168,8 +198,10 @@ class OrbitalDefenderEnv(gym.Env):
                 
                 # Early destruction bonus: Extra reward for hitting far asteroids
                 if hit_asteroid["distance"] > 8.5:
-                    early_destruction_bonus = 10.0  # Increased from 5.0
+                    early_destruction_bonus = 20.0  # Increased from 10.0 - much stronger incentive
                 elif hit_asteroid["distance"] > 7.5:
+                    early_destruction_bonus = 10.0  # Increased from 5.0
+                elif hit_asteroid["distance"] > 6.5:
                     early_destruction_bonus = 5.0
                 else:
                     early_destruction_bonus = 0.0
@@ -196,8 +228,8 @@ class OrbitalDefenderEnv(gym.Env):
         
         # Bonus for clearing all asteroids (PERFECT EPISODE)
         if len(self.asteroids) == 0 and not terminated:
-            completion_bonus = 50.0  # Large bonus for perfect clear
-            efficiency_bonus = max(0, 10.0 - self.steps * 0.05)  # Bonus for speed
+            completion_bonus = 50.0  # Reduced from 100.0 to reduce variance
+            efficiency_bonus = max(0, 15.0 - self.steps * 0.05)  # Reduced from 20.0
             reward += completion_bonus + efficiency_bonus
             terminated = True
         

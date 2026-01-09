@@ -83,6 +83,16 @@ def train_dqn(
     print()
     
     for episode in range(start_episode, episodes):
+        # Enhanced curriculum learning: gradually increase difficulty
+        if episode < 1500:
+            env.curriculum_level = 2  # Start with 2 asteroids (very easy)
+        elif episode < 3000:
+            env.curriculum_level = 3  # Then 3 asteroids
+        elif episode < 4000:
+            env.curriculum_level = 4  # Then 4 asteroids
+        else:
+            env.curriculum_level = 5  # Finally 5 asteroids (full difficulty)
+        
         state, _ = env.reset()
         episode_reward = 0
         episode_length = 0

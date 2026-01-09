@@ -1,2 +1,22 @@
-__pycache__/
+Python
+pycache/
 *.pyc
+.venv/
+env/
+
+ML / RL
+models/
+checkpoints/
+logs/
+runs/
+*.pt
+*.pth
+*.h5
+*.pkl
+
+Data
+data/
+datasets/
+
+OS
+.DS_Store
